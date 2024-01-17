@@ -1,6 +1,6 @@
 -- LuaTools需要PROJECT和VERSION这两个信息
 PROJECT = "sms_forwarding"
-VERSION = "1.0.0"
+VERSION = "1.0.2"
 
 log.info("main", PROJECT, VERSION)
 
@@ -9,8 +9,8 @@ log.info("main", PROJECT, VERSION)
 --支持邮件/企业微信/钉钉/飞书/电报/IOS Bark
 
 --使用哪个推送服务
---可选：luatos/serverChan/pushplus
-local useServer = "pushplus"
+--可选：luatos/serverChan/pushplus/wxpusher
+local useServer = "wxpusher"
 
 --LuatOS社区提供的推送服务 https://push.luatos.org/，用不到可留空
 --这里填.send前的字符串就好了
@@ -24,6 +24,11 @@ local serverKey = ""
 
 --pushplus配置，用不到可留空，填入你的pushplus token
 local pushplusToken = ""
+
+--wxpusher配置，用不到可留空，填入你的WxPusher token
+local wxpusherToken = ""
+--此wxtopicid是在应用里的主题管理中创建的主题ID，并不是应用ID，请注意 
+local wxtopicid = ""
 
 --缓存消息
 local buff = {}
@@ -96,9 +101,9 @@ sys.taskInit(function()
                 end
             elseif useServer == "pushplus" then --pushplus
                 log.info("notify","send to Pushplus",data)
-                local body = {
+                    local body = {
                     token = pushplusToken,
-                    title = "SMS: "..sms[1],
+                    title = "【短信转发】来自: "..sms[1],
                     content = data
                 }
                 local json_body = string.gsub(json.encode(body), "\\b", "\\n") --luatos bug
@@ -106,7 +111,7 @@ sys.taskInit(function()
                 for i=1,10 do
                     code, h, body = http.request(
                             "POST",
-                            "http://www.pushplus.plus/send//messages.json",
+                            "http://www.pushplus.plus/send/messages.json",
                             {["Content-Type"] = "application/json; charset=utf-8"},
                             json_body
                         ).wait()
@@ -116,6 +121,30 @@ sys.taskInit(function()
                     end
                     sys.wait(5000)
                 end
+            elseif useServer == "wxpusher" then --WxPusher
+                log.info("notify","send to wxpusher",data)
+                    local body = {
+                    appToken = wxpusherToken,
+                    summary = "【短信转发】来自: "..sms[1],
+                    topicIds = {wxtopicid},
+                    content = data,
+                    contentType = 1
+                }
+                local json_body = string.gsub(json.encode(body), "\\b", "\\n") --luatos bug
+                --多试几次好了
+                for i=1,10 do
+                    code, h, body = http.request(
+                            "POST",
+                            "https://wxpusher.zjiecode.com/api/send/message",
+                            {["Content-Type"] = "application/json; charset=utf-8"},
+                            json_body
+                        ).wait()
+                    log.info("notify","pushed sms notify",code,h,body,sms[1])
+                    if code == 200 then
+                        break
+                    end
+                    sys.wait(5000)
+                end                         
             else--luatos推送服务
                 data = data:gsub("%%","%%25")
                 :gsub("+","%%2B")
