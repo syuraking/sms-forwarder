@@ -1,6 +1,6 @@
 -- LuaTools需要PROJECT和VERSION这两个信息
 PROJECT = "sms_forwarding"
-VERSION = "1.0.7"
+VERSION = "1.1.0"
 
 log.info("main", PROJECT, VERSION)
 
@@ -23,29 +23,35 @@ local luatosPush = ""
 local serverKey = ""
 
 --pushplus配置，用不到可留空，填入你的pushplus token
-local pushplusToken = "d0"
+local pushplusToken = "yoour tokens"
 
 --wxpusher配置，用不到可留空，填入你的WxPusher token
-local wxpusherToken = "AT_ yourtokens"
+local wxpusherToken = "AT_ your tokens"
 --此wxtopicid是在应用里的主题管理中创建的主题ID，并不是应用ID，请注意 
 local wxtopicid = "your ids"
 
 --缓存消息
 local buff = {}
 
+--定义多长时间开关一次飞行模式，默认为12小时
+local FLYMODE_INTERVAL = 1000 * 60 * 60 * 12
+
+--自动返回信号强度
+local AUTO_SIGN = 1000 * 60 * 10
+
 -- 引入必要的库文件(lua编写), 内部库不需要require
 sys = require("sys")
 require "sysplus" -- http库需要这个sysplus
 
-if wdt then
-    --添加硬狗防止程序卡死，在支持的设备上启用这个功能
-    wdt.init(9000)--初始化watchdog设置为9s
-    sys.timerLoopStart(wdt.feed, 3000)--3s喂一次狗
-end
+--修改默认系统看门狗，防止死机
+wdt.init(9000)
+sys.timerLoopStart(wdt.feed, 3000)
+
 log.info("main", "短信转发服务工作中...")
 
 -- SIM 自动恢复, 周期性获取小区信息, 网络遇到严重故障时尝试自动恢复等功能
 mobile.setAuto(10000, 30000, 8, true, 60000)
+--启用IPV6
 mobile.ipv6(true)
 
 --运营商给的dns经常抽风，手动指定
@@ -63,7 +69,7 @@ end)
 
 sys.taskInit(function()
     while true do
-        print("ww",collectgarbage("count"))
+        print("已使用内存",collectgarbage("count"),"KB")
         while #buff > 0 do--把消息读完
             collectgarbage("collect")--防止内存不足
             local sms = table.remove(buff,1)
@@ -156,11 +162,32 @@ sys.taskInit(function()
                 end
             end
         end
-        log.info("【提示】","开始等待下一条新短信...")
-        print("转发用时",collectgarbage("count")) 
+        print("已使用内存",collectgarbage("count"),"KB")
+        log.info("【提示】","清理内存，开始等待下一条新短信...")
+        print(collectgarbage("collect"))
         sys.waitUntil("SMS_ADD")
     end
 end)
+
+if type (FLYMODE_INTERVAL) == "number" and FLYMODE_INTERVAL >= 1000 * 60 then
+    sys.timerLoopStart(function()
+        sys.taskInit(function()
+            log.info("main", "定时开关飞行模式")
+            mobile.reset()
+            sys.wait(1000)
+            mobile.flymode(0, true)
+            mobile.flymode(0, false)
+        end)
+    end, FLYMODE_INTERVAL)
+end
+
+if type (AUTO_SIGN) == "number" and AUTO_SIGN >= 1000 * 60 then
+    sys.timerLoopStart(function()
+        sys.taskInit(function()
+            log.info("信号强度: " .. mobile.rsrp() .. " dBm")
+        end)
+    end, AUTO_SIGN)
+end
 
 
 -- 用户代码已结束---------------------------------------------
