@@ -1,6 +1,6 @@
 -- LuaTools需要PROJECT和VERSION这两个信息
 PROJECT = "sms_forwarding"
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 
 log.info("main", PROJECT, VERSION)
 
@@ -23,20 +23,20 @@ local luatosPush = ""
 local serverKey = ""
 
 --pushplus配置，用不到可留空，填入你的pushplus token
-local pushplusToken = "yoour tokens"
+local pushplusToken = "your token"
 
 --wxpusher配置，用不到可留空，填入你的WxPusher token
-local wxpusherToken = "AT_ your tokens"
+local wxpusherToken = "your token"
 --此wxtopicid是在应用里的主题管理中创建的主题ID，并不是应用ID，请注意 
-local wxtopicid = "your ids"
+local wxtopicid = "your topic id"
 
---缓存消息
+--定义缓存消息变量
 local buff = {}
 
 --定义多长时间开关一次飞行模式，默认为12小时
 local FLYMODE_INTERVAL = 1000 * 60 * 60 * 12
 
---自动返回信号强度
+--定义多长时间返回网络状态信息，默认为10分钟
 local AUTO_SIGN = 1000 * 60 * 10
 
 -- 引入必要的库文件(lua编写), 内部库不需要require
@@ -51,12 +51,24 @@ log.info("main", "短信转发服务工作中...")
 
 -- SIM 自动恢复, 周期性获取小区信息, 网络遇到严重故障时尝试自动恢复等功能
 mobile.setAuto(10000, 30000, 8, true, 60000)
+
 --启用IPV6
 mobile.ipv6(true)
 
 --运营商给的dns经常抽风，手动指定
-socket.setDNS(nil, 1, "119.29.29.29")
-socket.setDNS(nil, 2, "223.5.5.5")
+socket.setDNS(nil, 1, "223.5.5.5")
+socket.setDNS(nil, 2, "119.29.29.29")
+
+--定期返回网络状态信息，防止模块休眠，变量设置在上面
+if type (AUTO_SIGN) == "number" and AUTO_SIGN >= 1000 * 60 then
+    sys.timerLoopStart(function()
+       sys.taskInit(function()
+            mobile.reqCellInfo(5)
+            sys.waitUntil("CELL_INFO_UPDATE", 5000)
+            log.info("【当前网络信息】", json.encode(mobile.getCellInfo()[1]))
+      end)
+  end, AUTO_SIGN)
+end
 
 --订阅短信消息
 sys.subscribe("SMS_INC",function(phone,data)
@@ -67,14 +79,20 @@ sys.subscribe("SMS_INC",function(phone,data)
     sys.publish("SMS_ADD")--推个事件
 end)
 
+--主程序部分
 sys.taskInit(function()
     while true do
         print("已使用内存",collectgarbage("count"),"KB")
         while #buff > 0 do--把消息读完
             collectgarbage("collect")--防止内存不足
+--变量定义
             local sms = table.remove(buff,1)
             local code,h, body
             local data = sms[2]
+            local sms_info =mobile.getCellInfo()[1]
+            local simband = sms_info.band 
+            local simrsrp = sms_info.rsrp 
+
             if useServer == "serverChan" then--server酱
                 log.info("【提示】","正在转发至serverChan",data)
                 --多试几次好了
@@ -92,12 +110,13 @@ sys.taskInit(function()
                     end
                     --sys.wait(2000)
                 end
+
             elseif useServer == "pushplus" then --pushplus
                 log.info("【提示】","正在转发至Pushplus",data)
                     local body = {
                     token = pushplusToken,
                     title = "【短信转发】来自: "..sms[1],
-                    content = data
+                    content = "【短信内容】\n\n来自: ".. sms[1] .."\n\n".. data .. "\n\n【信号强度】" .. mobile.rsrp() .. " dBm\n【当前频段】LTE B".. simband
                 }
                 local json_body = string.gsub(json.encode(body), "\\b", "\\n") --luatos bug
                 --多试几次好了
@@ -115,13 +134,14 @@ sys.taskInit(function()
                     end
                     --sys.wait(2000)
                 end
+
             elseif useServer == "wxpusher" then --WxPusher
                 log.info("【提示】","正在转发至wxpusher",data)
                     local body = {
                     appToken = wxpusherToken,
                     summary = "【短信转发】来自: "..sms[1],
                     topicIds = {wxtopicid},
-                    content = data,
+                    content = "【号码】来自: ".. sms[1] .."\n\n".. data .. "\n\n【信号强度】" .. mobile.rsrp() .. "  dBm\n【当前频段】LTE B".. simband,
                     contentType = 1
                 }
                 local json_body = string.gsub(json.encode(body), "\\b", "\\n") --luatos bug
@@ -140,6 +160,7 @@ sys.taskInit(function()
                     end
                     --sys.wait(2000)
                 end                         
+
             else--luatos推送服务
                 data = data:gsub("%%","%%25")
                 :gsub("+","%%2B")
@@ -169,6 +190,7 @@ sys.taskInit(function()
     end
 end)
 
+--定期切换飞行模式，防止信号问题，变量设置在上面
 if type (FLYMODE_INTERVAL) == "number" and FLYMODE_INTERVAL >= 1000 * 60 then
     sys.timerLoopStart(function()
         sys.taskInit(function()
@@ -180,15 +202,6 @@ if type (FLYMODE_INTERVAL) == "number" and FLYMODE_INTERVAL >= 1000 * 60 then
         end)
     end, FLYMODE_INTERVAL)
 end
-
-if type (AUTO_SIGN) == "number" and AUTO_SIGN >= 1000 * 60 then
-    sys.timerLoopStart(function()
-        sys.taskInit(function()
-            log.info("信号强度: " .. mobile.rsrp() .. " dBm")
-        end)
-    end, AUTO_SIGN)
-end
-
 
 -- 用户代码已结束---------------------------------------------
 -- 结尾总是这一句
